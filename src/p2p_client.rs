@@ -1,4 +1,3 @@
-// week_two.rs
 use std::net::{TcpStream, ToSocketAddrs, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::io::{Write, Read, ErrorKind};
@@ -117,6 +116,8 @@ impl BitcoinClient {
             match TcpStream::connect_timeout(addr, Duration::from_secs(10)) {
                 Ok(s) => {
                     println!("✅ Connected successfully!");
+                    // Set a reasonable read timeout to prevent hanging
+                    s.set_read_timeout(Some(Duration::from_secs(30)))?;
                     self.stream = Some(s);
                     self.connected_addr = Some(*addr);
                     break;
@@ -145,7 +146,17 @@ impl BitcoinClient {
     }
     
     fn message_loop(&mut self) -> std::io::Result<()> {
+        let mut getaddr_sent = false;
+        let mut message_count = 0;
+        let max_messages = 500000; 
+        
         loop {
+            message_count += 1;
+            if message_count > max_messages {
+                println!("\n🎯 Processed {} messages, ending demo", max_messages);
+                break;
+            }
+            
             if !self.is_connection_alive()? {
                 println!("🔌 Connection closed by peer");
                 break;
@@ -158,17 +169,20 @@ impl BitcoinClient {
                     
                     self.handle_message(&command, &payload)?;
                     
+                    // Send getaddr after handshake completes, but only once
                     if self.version_received && self.verack_received && !self.handshake_complete {
                         println!("\n🤝 Handshake complete!");
                         self.handshake_complete = true;
-                        
-
+                    }
+                    
+                    if self.handshake_complete && !getaddr_sent {
                         println!("📤 Requesting peer addresses...");
                         self.send_message("getaddr", &[])?;
+                        getaddr_sent = true;
                     }
                 }
                 Ok(None) => {
-
+                    // No message available, small delay
                     std::thread::sleep(Duration::from_millis(100));
                 }
                 Err(e) => {
@@ -176,11 +190,10 @@ impl BitcoinClient {
                     break;
                 }
             }
-
-            if self.handshake_complete {
-                std::thread::sleep(Duration::from_secs(15));
-                println!("\n🎯 Demo complete, closing connection");
-                break;
+            
+            // If we've completed handshake and sent getaddr, wait a bit more for responses
+            if self.handshake_complete && getaddr_sent {
+                std::thread::sleep(Duration::from_millis(500));
             }
         }
         
@@ -217,10 +230,23 @@ impl BitcoinClient {
             }
             "addr" => {
                 println!("   📍 Address list received");
-                parse_addr_message(payload);
+                let addresses = parse_addr_message(payload);
+                println!("   📊 Successfully parsed {} addresses", addresses.len());
+            }
+            "alert" => {
+                println!("   ⚠️  Alert message received (ignoring)");
+            }
+            "sendheaders" => {
+                println!("   📋 SendHeaders message received");
+            }
+            "sendcmpct" => {
+                println!("   📦 SendCmpct message received");
+            }
+            "feefilter" => {
+                println!("   💰 FeeFilter message received");
             }
             _ => {
-                println!("   ❓ Unknown command: {}", command);
+                println!("   ❓ Unknown command: {} ({} bytes)", command, payload.len());
             }
         }
         
@@ -230,12 +256,15 @@ impl BitcoinClient {
     fn is_connection_alive(&mut self) -> std::io::Result<bool> {
         if let Some(stream) = &mut self.stream {
             let mut peek_buf = [0u8; 1];
-            match stream.peek(&mut peek_buf) {
-                Ok(0) => Ok(false), // Connection closed
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock => Ok(true), // No data but alive
-                Err(_) => Ok(false), // Connection error
-                Ok(_) => Ok(true),   // Data available
-            }
+            stream.set_nonblocking(true)?;
+            let result = match stream.peek(&mut peek_buf) {
+                Ok(0) => false, // Connection closed
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => true, // No data but alive
+                Err(_) => false, // Connection error
+                Ok(_) => true,   // Data available
+            };
+            stream.set_nonblocking(false)?;
+            Ok(result)
         } else {
             Ok(false)
         }
@@ -258,10 +287,13 @@ impl BitcoinClient {
     
     fn read_message(&mut self) -> std::io::Result<Option<(MessageHeader, Vec<u8>)>> {
         if let Some(stream) = &mut self.stream {
+            // Try to read header first - use non-blocking for availability check
             stream.set_nonblocking(true)?;
-            
             let mut header_buf = [0u8; 24];
-            match stream.read_exact(&mut header_buf) {
+            let header_result = stream.read_exact(&mut header_buf);
+            stream.set_nonblocking(false)?;
+            
+            match header_result {
                 Ok(_) => {}
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     return Ok(None);
@@ -280,13 +312,13 @@ impl BitcoinClient {
             if header.payload_size > 0 {
                 stream.read_exact(&mut payload)?;
                 
+                // Verify checksum
                 let computed_checksum = sha256d(&payload);
                 if header.checksum != computed_checksum[0..4] {
                     return Err(std::io::Error::new(ErrorKind::InvalidData, "Invalid checksum"));
                 }
             }
             
-            stream.set_nonblocking(false)?;
             Ok(Some((header, payload)))
         } else {
             Ok(None)
@@ -297,17 +329,20 @@ impl BitcoinClient {
 fn build_version_payload(peer_addr: SocketAddr) -> Vec<u8> {
     let mut payload = Vec::new();
     
+    // Protocol version
     payload.extend(70015u32.to_le_bytes());
     
+    // Services (NODE_NETWORK)
     payload.extend(1u64.to_le_bytes());
     
+    // Timestamp
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
     payload.extend(timestamp.to_le_bytes());
     
-
+    // Peer address (recipient)
     payload.extend(1u64.to_le_bytes()); // Services
     match peer_addr {
         SocketAddr::V4(v4) => {
@@ -322,18 +357,21 @@ fn build_version_payload(peer_addr: SocketAddr) -> Vec<u8> {
         }
     }
     
-
+    // My address (sender)
     payload.extend(0u64.to_le_bytes());  // Services
-    payload.extend([0x00; 16]);          // IPv6
+    payload.extend([0x00; 16]);          // IPv6 (all zeros for local)
     payload.extend(0u16.to_be_bytes());  // Port
     
-
+    // Nonce
     payload.extend(123456789u64.to_le_bytes());
     
+    // User agent (empty)
     payload.push(0x00); // Compact size (length 0)
     
+    // Start height
     payload.extend(0i32.to_le_bytes());
     
+    // Relay flag
     payload.push(0x01); // True
     
     payload
@@ -343,49 +381,106 @@ fn parse_addr_message(payload: &[u8]) -> Vec<SocketAddr> {
     let mut addresses = Vec::new();
     
     if payload.is_empty() {
+        println!("   ⚠️  Empty address payload");
         return addresses;
     }
     
-    let count = payload[0] as usize;
+    // Parse compact size integer for count
+    let (count, mut offset) = parse_compact_size(payload);
     println!("   📊 Address count: {}", count);
     
-    let mut offset = 1;
-    for i in 0..count.min(10) { // Limit to first 10 for display
+    if count == 0 {
+        return addresses;
+    }
+    
+    let addresses_to_show = count.min(10); // Show first 10
+    
+    for i in 0..addresses_to_show {
         if offset + 30 > payload.len() {
+            println!("   ⚠️  Insufficient data for address {}", i + 1);
             break;
         }
         
-        offset += 12;
+        // Skip timestamp (4 bytes)
+        offset += 4;
         
+        // Skip services (8 bytes)  
+        offset += 8;
+        
+        // Read IP address (16 bytes)
         let ip_bytes = &payload[offset..offset + 16];
         offset += 16;
         
+        // Read port (2 bytes, big endian)
+        if offset + 2 > payload.len() {
+            break;
+        }
         let port = u16::from_be_bytes([payload[offset], payload[offset + 1]]);
         offset += 2;
         
-
-        if ip_bytes[0..12] == [0x00; 10] && ip_bytes[10..12] == [0xFF, 0xFF] {
+        // Parse IP address
+        if ip_bytes[0..12] == [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF] {
+            // IPv4 address
             let ipv4 = std::net::Ipv4Addr::new(
                 ip_bytes[12], ip_bytes[13], ip_bytes[14], ip_bytes[15]
             );
             let addr = SocketAddr::V4(std::net::SocketAddrV4::new(ipv4, port));
-            println!("     {}: {}", i + 1, addr);
+            println!("     {}: {} (IPv4)", i + 1, addr);
             addresses.push(addr);
         } else {
+            // IPv6 address
             let ipv6 = std::net::Ipv6Addr::from(
                 *<&[u8; 16]>::try_from(ip_bytes).unwrap()
             );
             let addr = SocketAddr::V6(std::net::SocketAddrV6::new(ipv6, port, 0, 0));
-            println!("     {}: {}", i + 1, addr);
+            println!("     {}: {} (IPv6)", i + 1, addr);
             addresses.push(addr);
         }
     }
     
-    if count > 10 {
-        println!("     ... and {} more addresses", count - 10);
+    if count > addresses_to_show {
+        println!("     ... and {} more addresses", count - addresses_to_show);
     }
     
     addresses
+}
+
+fn parse_compact_size(data: &[u8]) -> (usize, usize) {
+    if data.is_empty() {
+        return (0, 0);
+    }
+    
+    let first_byte = data[0];
+    match first_byte {
+        0x00..=0xFC => (first_byte as usize, 1),
+        0xFD => {
+            if data.len() >= 3 {
+                let value = u16::from_le_bytes([data[1], data[2]]) as usize;
+                (value, 3)
+            } else {
+                (0, 1)
+            }
+        }
+        0xFE => {
+            if data.len() >= 5 {
+                let value = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
+                (value, 5)
+            } else {
+                (0, 1)
+            }
+        }
+        0xFF => {
+            if data.len() >= 9 {
+                let value = u64::from_le_bytes([
+                    data[1], data[2], data[3], data[4],
+                    data[5], data[6], data[7], data[8]
+                ]) as usize;
+                (value, 9)
+            } else {
+                (0, 1)
+            }
+        }
+    }
 }
 
 fn sha256d(data: &[u8]) -> [u8; 32] {
