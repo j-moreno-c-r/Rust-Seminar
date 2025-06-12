@@ -4,12 +4,71 @@ use std::io::{Write, Read, ErrorKind};
 use crate::p2p::messageheader::MessageHeader;
 use crate::p2p::utils::{sha256d, MAGIC};
 
+// Inventory types as defined in Bitcoin protocol
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InventoryType {
+    Error = 0,
+    Transaction = 1,
+    Block = 2,
+    FilteredBlock = 3,
+    CompactBlock = 4,
+    WitnessTransaction = 0x40000001,
+    WitnessBlock = 0x40000002,
+    FilteredWitnessBlock = 0x40000003,
+}
+
+impl InventoryType {
+    fn from_u32(value: u32) -> Self {
+        match value {
+            0 => InventoryType::Error,
+            1 => InventoryType::Transaction,
+            2 => InventoryType::Block,
+            3 => InventoryType::FilteredBlock,
+            4 => InventoryType::CompactBlock,
+            0x40000001 => InventoryType::WitnessTransaction,
+            0x40000002 => InventoryType::WitnessBlock,
+            0x40000003 => InventoryType::FilteredWitnessBlock,
+            _ => InventoryType::Error,
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            InventoryType::Error => "ERROR",
+            InventoryType::Transaction => "TX",
+            InventoryType::Block => "BLOCK",
+            InventoryType::FilteredBlock => "FILTERED_BLOCK",
+            InventoryType::CompactBlock => "COMPACT_BLOCK",
+            InventoryType::WitnessTransaction => "WITNESS_TX",
+            InventoryType::WitnessBlock => "WITNESS_BLOCK",
+            InventoryType::FilteredWitnessBlock => "FILTERED_WITNESS_BLOCK",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InventoryItem {
+    pub inv_type: InventoryType,
+    pub hash: [u8; 32],
+}
+
+impl InventoryItem {
+    fn hash_hex(&self) -> String {
+        // Bitcoin displays hashes in reverse byte order (little endian)
+        let mut reversed = self.hash;
+        reversed.reverse();
+        hex::encode(reversed)
+    }
+}
+
 pub struct BitcoinClient {
     stream: Option<TcpStream>,
     connected_addr: Option<SocketAddr>,
     handshake_complete: bool,
     version_received: bool,
     verack_received: bool,
+    // Track inventory items we've seen to avoid requesting duplicates
+    seen_inventory: std::collections::HashSet<[u8; 32]>,
 }
 
 impl BitcoinClient {
@@ -20,6 +79,7 @@ impl BitcoinClient {
             handshake_complete: false,
             version_received: false,
             verack_received: false,
+            seen_inventory: std::collections::HashSet::new(),
         }
     }
     
@@ -164,6 +224,10 @@ impl BitcoinClient {
             "pong" => {
                 println!("   🏓 Pong received");
             }
+            "inv" => {
+                println!("   📦 Inventory message received");
+                self.handle_inv_message(payload)?;
+            }
             "addr" => {
                 println!("   📍 Address list received");
                 let addresses = parse_addr_message(payload);
@@ -184,6 +248,66 @@ impl BitcoinClient {
             _ => {
                 println!("   ❓ Unknown command: {} ({} bytes)", command, payload.len());
             }
+        }
+        
+        Ok(())
+    }
+    
+    fn handle_inv_message(&mut self, payload: &[u8]) -> std::io::Result<()> {
+        let inventory_items = parse_inv_message(payload);
+        
+        if inventory_items.is_empty() {
+            println!("   ⚠️  Empty inventory message");
+            return Ok(());
+        }
+        
+        println!("   📊 Received {} inventory items:", inventory_items.len());
+        
+        let mut items_to_request = Vec::new();
+        
+        for (i, item) in inventory_items.iter().enumerate() {
+            let hash_str = item.hash_hex();
+            println!("     {}: {} - {}", i + 1, item.inv_type.name(), hash_str);
+            
+            // Check if we've already seen this item
+            if !self.seen_inventory.contains(&item.hash) {
+                self.seen_inventory.insert(item.hash);
+                
+                // Decide which types of inventory we want to request
+                match item.inv_type {
+                    InventoryType::Transaction | InventoryType::WitnessTransaction => {
+                        // Request transactions (you might want to limit this)
+                        if items_to_request.len() < 10 { // Limit to first 10 transactions
+                            items_to_request.push(item.clone());
+                        }
+                    }
+                    InventoryType::Block | InventoryType::WitnessBlock => {
+                        // Request blocks (be careful, blocks are large!)
+                        if items_to_request.len() < 3 { // Limit to first 3 blocks
+                            items_to_request.push(item.clone());
+                        }
+                    }
+                    InventoryType::CompactBlock => {
+                        // Request compact blocks
+                        items_to_request.push(item.clone());
+                    }
+                    _ => {
+                        // Skip other types for now
+                        println!("     → Skipping {} (not requesting)", item.inv_type.name());
+                    }
+                }
+            } else {
+                println!("     → Already seen this item, skipping");
+            }
+        }
+        
+        // Send getdata request for items we want
+        if !items_to_request.is_empty() {
+            println!("   📤 Requesting {} items via getdata...", items_to_request.len());
+            let getdata_payload = build_getdata_payload(&items_to_request);
+            self.send_message("getdata", &getdata_payload)?;
+        } else {
+            println!("   ✅ No new items to request");
         }
         
         Ok(())
@@ -260,6 +384,76 @@ impl BitcoinClient {
             Ok(None)
         }
     }
+}
+
+fn parse_inv_message(payload: &[u8]) -> Vec<InventoryItem> {
+    let mut items = Vec::new();
+    
+    if payload.is_empty() {
+        return items;
+    }
+    
+    // Parse compact size integer for count
+    let (count, mut offset) = parse_compact_size(payload);
+    
+    if count == 0 {
+        return items;
+    }
+    
+    // Each inventory item is 36 bytes (4 bytes type + 32 bytes hash)
+    for _ in 0..count {
+        if offset + 36 > payload.len() {
+            break;
+        }
+        
+        // Read type (4 bytes, little endian)
+        let type_bytes = &payload[offset..offset + 4];
+        let inv_type_raw = u32::from_le_bytes([type_bytes[0], type_bytes[1], type_bytes[2], type_bytes[3]]);
+        let inv_type = InventoryType::from_u32(inv_type_raw);
+        offset += 4;
+        
+        // Read hash (32 bytes)
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&payload[offset..offset + 32]);
+        offset += 32;
+        
+        items.push(InventoryItem {
+            inv_type,
+            hash,
+        });
+    }
+    
+    items
+}
+
+fn build_getdata_payload(items: &[InventoryItem]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    
+    // Add compact size for count
+    let count = items.len();
+    if count < 0xFD {
+        payload.push(count as u8);
+    } else if count <= 0xFFFF {
+        payload.push(0xFD);
+        payload.extend((count as u16).to_le_bytes());
+    } else if count <= 0xFFFFFFFF {
+        payload.push(0xFE);
+        payload.extend((count as u32).to_le_bytes());
+    } else {
+        payload.push(0xFF);
+        payload.extend((count as u64).to_le_bytes());
+    }
+    
+    // Add each inventory item
+    for item in items {
+        // Add type (4 bytes, little endian)
+        payload.extend((item.inv_type as u32).to_le_bytes());
+        
+        // Add hash (32 bytes)
+        payload.extend(item.hash);
+    }
+    
+    payload
 }
 
 fn build_version_payload(peer_addr: SocketAddr) -> Vec<u8> {
@@ -418,4 +612,3 @@ fn parse_compact_size(data: &[u8]) -> (usize, usize) {
         }
     }
 }
-
