@@ -1,0 +1,151 @@
+{
+  "peers": {
+    "[2402:1f00:8000:800::32f5]:8333": {
+      "address": "[2402:1f00:8000:800::32f5]:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.233.148.194:8333": {
+      "address": "172.233.148.194:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.104.247.232:8333": {
+      "address": "172.104.247.232:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "82.66.187.208:8333": {
+      "address": "82.66.187.208:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "65.60.184.114:8333": {
+      "address": "65.60.184.114:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.232.185.74:8333": {
+      "address": "172.232.185.74:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "79.127.136.87:8333": {
+      "address": "79.127.136.87:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "203.11.72.23:8333": {
+      "address": "203.11.72.23:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "45.90.58.91:8333": {
+      "address": "45.90.58.91:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "79.100.209.123:8333": {
+      "address": "79.100.209.123:8333",
+      "last_seen": 1749822627,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.234.237.13:8333": {
+      "address": "172.234.237.13:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "[2600:1700:2c2a:d000:a5fa:8a93:cdf6:5fa6]:8333": {
+      "address": "[2600:1700:2c2a:d000:a5fa:8a93:cdf6:5fa6]:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.233.223.232:8333": {
+      "address": "172.233.223.232:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "207.158.15.91:8333": {
+      "address": "207.158.15.91:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "80.111.186.166:8333": {
+      "address": "80.111.186.166:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "[2607:fea8:1b63:92b0::bce4]:8333": {
+      "address": "[2607:fea8:1b63:92b0::bce4]:8333",
+      "last_seen": 1749822604,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.104.247.34:8333": {
+      "address": "172.104.247.34:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.234.31.179:8333": {
+      "address": "172.234.31.179:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "172.104.249.214:8333": {
+      "address": "172.104.249.214:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "45.33.116.63:8333": {
+      "address": "45.33.116.63:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    },
+    "198.58.110.154:8333": {
+      "address": "198.58.110.154:8333",
+      "last_seen": 1749822729,
+      "last_connected": null,
+      "status": "NeverTried",
+      "services": null
+    }
+  }
+}

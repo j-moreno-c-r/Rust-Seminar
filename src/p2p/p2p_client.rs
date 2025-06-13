@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::io::{Write, Read, ErrorKind};
 use crate::p2p::messageheader::MessageHeader;
 use crate::p2p::utils::{sha256d, MAGIC};
+use crate::p2p::database::{PeerDatabase};
 
 // Inventory types as defined in Bitcoin protocol
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,12 +68,14 @@ pub struct BitcoinClient {
     handshake_complete: bool,
     version_received: bool,
     verack_received: bool,
-    // Track inventory items we've seen to avoid requesting duplicates
     seen_inventory: std::collections::HashSet<[u8; 32]>,
+    pub peer_db: PeerDatabase,
+
 }
 
 impl BitcoinClient {
     pub fn new() -> Self {
+        let peer_db = PeerDatabase::load_from_file("peers.json"); // <-- Carrega do disco
         BitcoinClient {
             stream: None,
             connected_addr: None,
@@ -80,16 +83,19 @@ impl BitcoinClient {
             version_received: false,
             verack_received: false,
             seen_inventory: std::collections::HashSet::new(),
+            peer_db, 
         }
     }
     
     pub fn run(&mut self) -> std::io::Result<()> {
         println!("🚀 Starting Bitcoin P2P Client");
-        
+
         self.connect()?;
         self.start_handshake()?;
         self.message_loop()?;
-        
+
+        self.peer_db.save_to_file("peers.json");
+
         Ok(())
     }
     
@@ -201,12 +207,12 @@ impl BitcoinClient {
             "version" => {
                 println!("   📋 Version message received");
                 self.version_received = true;
-                
+    
                 if payload.len() >= 4 {
                     let version = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
                     println!("   🔢 Protocol version: {}", version);
                 }
-                
+    
                 println!("📤 Sending verack...");
                 self.send_message("verack", &[])?;
             }
@@ -232,6 +238,12 @@ impl BitcoinClient {
                 println!("   📍 Address list received");
                 let addresses = parse_addr_message(payload);
                 println!("   📊 Successfully parsed {} addresses", addresses.len());
+                // Registra cada peer na base de dados
+                for addr in &addresses {
+                    self.peer_db.register_peer(*addr, None);
+                }
+                // Opcional: salve imediatamente após receber novos peers
+                self.peer_db.save_to_file("peers.json");
             }
             "alert" => {
                 println!("   ⚠️  Alert message received (ignoring)");
@@ -249,7 +261,7 @@ impl BitcoinClient {
                 println!("   ❓ Unknown command: {} ({} bytes)", command, payload.len());
             }
         }
-        
+    
         Ok(())
     }
     
