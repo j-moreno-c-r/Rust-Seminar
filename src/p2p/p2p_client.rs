@@ -4,6 +4,9 @@ use std::io::{Write, Read, ErrorKind};
 use crate::p2p::messageheader::MessageHeader;
 use crate::p2p::utils::{sha256d, MAGIC, parse_inv_message,parse_addr_message ,build_version_payload,build_getdata_payload};
 use crate::p2p::database::{PeerDatabase};
+use std::sync::mpsc::Sender;
+
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InventoryType {
     Error = 0,
@@ -99,7 +102,6 @@ impl BitcoinClient {
     }
     
     pub fn connect(&mut self) -> std::io::Result<()> {
-        // Step 1: Resolve DNS and explore addresses
         println!("\n🔍 Resolving seed.bitcoin.sipa.be:8333...");
         let socket_addrs: Vec<_> = "seed.bitcoin.sipa.be:8333"
             .to_socket_addrs()?
@@ -111,13 +113,11 @@ impl BitcoinClient {
                      if addr.is_ipv4() { "IPv4" } else { "IPv6" });
         }
         
-        // Try to connect to each address until one succeeds
         for addr in &socket_addrs {
             println!("\n🔌 Attempting to connect to {}...", addr);
             match TcpStream::connect_timeout(addr, Duration::from_secs(10)) {
                 Ok(s) => {
                     println!("✅ Connected successfully!");
-                    // Set a reasonable read timeout to prevent hanging
                     s.set_read_timeout(Some(Duration::from_secs(30)))?;
                     self.stream = Some(s);
                     self.connected_addr = Some(*addr);
@@ -139,7 +139,6 @@ impl BitcoinClient {
     }
     
     pub fn start_handshake(&mut self) -> std::io::Result<()> {
-        // Send version message
         println!("\n📤 Sending version message...");
         let version_payload = build_version_payload(self.connected_addr.unwrap());
         self.send_message("version", &version_payload)?;
@@ -406,9 +405,57 @@ impl BitcoinClient {
         self.verack_received = false;
         Ok(())
     }
+
+    pub fn message_loop_with_channel(&mut self, tx: &Sender<String>) -> std::io::Result<()> {
+        let mut getaddr_sent = false;
+        let mut message_count = 0;
+        let max_messages = 500000;
+
+        loop {
+            message_count += 1;
+            if message_count > max_messages {
+                let _ = tx.send(format!("\n🎯 Processed {} messages, ending demo", max_messages));
+                break;
+            }
+
+            if !self.is_connection_alive()? {
+                let _ = tx.send("🔌 Connection closed by peer".to_string());
+                break;
+            }
+
+            match self.read_message() {
+                Ok(Some((header, payload))) => {
+                    let command = header.command_str();
+                    let _ = tx.send(format!("⬇️ Received: {} ({} bytes)", command, payload.len()));
+
+                    // Opcional: envie mais detalhes se quiser
+                    // self.handle_message(&command, &payload)?;
+
+                    if self.version_received && self.verack_received && !self.handshake_complete {
+                        let _ = tx.send("\n🤝 Handshake complete!".to_string());
+                        self.handshake_complete = true;
+                    }
+                    if self.handshake_complete && !getaddr_sent {
+                        let _ = tx.send("📤 Requesting peer addresses...".to_string());
+                        self.send_message("getaddr", &[])?;
+                        getaddr_sent = true;
+                    }
+                }
+                Ok(_none) => {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => {
+                    let _ = tx.send(format!("❌ Error reading message: {}", e));
+                    break;
+                }
+            }
+            if self.handshake_complete && getaddr_sent {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+        Ok(())
+    }
 }
-
-
 impl Clone for BitcoinClient {
     fn clone(&self) -> Self {
         BitcoinClient {

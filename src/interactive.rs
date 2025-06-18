@@ -5,8 +5,10 @@ use colored::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration; 
-use chrono::NaiveDateTime;
+use std::time::Duration;
+use chrono;
+use std::sync::mpsc::{self, Receiver};
+
 pub enum Command {
     Start,
     Stop,
@@ -56,6 +58,7 @@ pub struct InteractiveCli {
     running: bool,
     client_thread: Option<JoinHandle<()>>,
     client_running: Arc<AtomicBool>,
+    client_rx: Option<Receiver<String>>,
 }
 
 impl InteractiveCli {
@@ -66,19 +69,30 @@ impl InteractiveCli {
             running: true,
             client_thread: None,
             client_running: Arc::new(AtomicBool::new(false)),
+            client_rx: None,
         }
     }
 
     pub fn run(&mut self) -> io::Result<()> {
         println!("{}", "🚀 Bitcoin P2P Cliente Interativo".bold().green());
         println!("{}", "Digite 'help' para ver os comandos disponíveis".italic());
-        
+
         while self.running {
+            // Exibe mensagens do cliente, se houver
+            if let Some(rx) = &self.client_rx {
+                while let Ok(msg) = rx.try_recv() {
+                    println!("{}", msg);
+                }
+            }
+
             print!("\n> ");
             io::stdout().flush()?;
 
             let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
+            if io::stdin().read_line(&mut input).is_err() {
+                println!("Erro ao ler entrada.");
+                continue;
+            }
 
             let command = Command::from_str(&input);
             self.handle_command(command)?;
@@ -141,7 +155,7 @@ impl InteractiveCli {
 
         println!("🚀 Iniciando cliente Bitcoin P2P...");
         println!("📡 Conectando a {}:{}", self.config.host, self.config.port);
-        
+
         let mut client = BitcoinClient::new();
         match client.connect() {
             Ok(_) => {
@@ -150,12 +164,14 @@ impl InteractiveCli {
                         println!("✅ Conexão estabelecida com sucesso!");
                         self.client_running.store(true, Ordering::SeqCst);
                         let running = self.client_running.clone();
-                        
+
+                        let (tx, rx) = mpsc::channel::<String>();
                         let mut client_clone = client.clone();
+
                         let client_thread = thread::spawn(move || {
                             while running.load(Ordering::SeqCst) {
-                                if let Err(e) = client_clone.message_loop() {
-                                    println!("❌ Erro no loop de mensagens: {}", e);
+                                if let Err(e) = client_clone.message_loop_with_channel(&tx) {
+                                    let _ = tx.send(format!("❌ Erro no loop de mensagens: {}", e));
                                     break;
                                 }
                                 thread::sleep(Duration::from_millis(100));
@@ -164,8 +180,9 @@ impl InteractiveCli {
 
                         self.client_thread = Some(client_thread);
                         self.client = Some(client);
+                        self.client_rx = Some(rx);
                         println!("✅ Cliente iniciado em background");
-                    } 
+                    }
                     Err(e) => println!("❌ Erro no handshake: {}", e),
                 }
             }
@@ -177,12 +194,13 @@ impl InteractiveCli {
     fn stop_client(&mut self) -> io::Result<()> {
         if let Some(mut client) = self.client.take() {
             self.client_running.store(false, Ordering::SeqCst);
-            
+
             if let Some(thread) = self.client_thread.take() {
                 let _ = thread.join();
             }
 
             client.soft_stop()?;
+            self.client_rx = None;
             println!("🛑 Cliente Bitcoin P2P parado.");
         } else {
             println!("⚠️  Cliente não está rodando.");
@@ -200,21 +218,21 @@ impl InteractiveCli {
         }
     }
 
-fn list_peers(&self) {
-    match &self.client {
-        Some(client) => {
-            let peers = &client.peer_db.peers;
-            println!("📡 Peers conhecidos: {}", peers.len());
-            for (addr, info) in peers {
-                println!("   {} (último contato: {:?})", 
-                    addr, 
-                    info.last_seen.map(|ts| 
-                        NaiveDateTime::from_timestamp(ts as i64, 0)
-                    )
-                );
+    fn list_peers(&self) {
+        match &self.client {
+            Some(client) => {
+                let peers = &client.peer_db.peers;
+                println!("📡 Peers conhecidos: {}", peers.len());
+                for (addr, info) in peers {
+                    println!("   {} (último contato: {:?})",
+                        addr,
+                        info.last_seen.map(|ts|
+                            chrono::DateTime::from_timestamp(ts as i64, 0)
+                        )
+                    );
+                }
             }
+            None => println!("❌ Cliente não está rodando"),
         }
-        None => println!("❌ Cliente não está rodando"),
     }
-}
 }
