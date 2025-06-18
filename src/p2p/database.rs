@@ -22,7 +22,7 @@ pub struct PeerInfo {
     pub services: Option<u64>,      
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PeerDatabase {
     pub peers: HashMap<SocketAddr, PeerInfo>,
 }
@@ -58,7 +58,6 @@ impl PeerDatabase {
             services,
         });
         entry.last_seen = Some(now);
-        // Só atualiza services se for Some
         if let Some(s) = services {
             entry.services = Some(s);
         }
