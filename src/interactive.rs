@@ -19,6 +19,7 @@ pub enum Command {
     ListPeers,
     Help,
     Exit,
+    Clear,
     Unknown,
 }
 
@@ -47,6 +48,7 @@ impl Command {
             Some("peers") => Command::ListPeers,
             Some("help") => Command::Help,
             Some("exit") | Some("quit") => Command::Exit,
+            Some("clear") => Command::Clear,
             _ => Command::Unknown,
         }
     }
@@ -132,6 +134,10 @@ impl InteractiveCli {
                 println!("✅ Porta atualizada para: {}", self.config.port);
             }
             Command::ListPeers => self.list_peers(),
+            Command::Clear => {
+                print!("\x1B[2J\x1B[1;1H");
+                io::stdout().flush()?;
+            },
             Command::Exit => {
                 if self.client.is_some() {
                     println!("⚠️ Parando cliente antes de sair...");
@@ -155,6 +161,7 @@ impl InteractiveCli {
         println!("   sethost <host>    - Define o host para conexão");
         println!("   setport <port>    - Define a porta para conexão");
         println!("   peers             - Lista os peers conhecidos");
+        println!("   clear             - Limpa a tela"); 
         println!("   exit              - Sai do programa");
     }
 

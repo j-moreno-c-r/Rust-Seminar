@@ -382,7 +382,6 @@ impl BitcoinClient {
             if header.payload_size > 0 {
                 stream.read_exact(&mut payload)?;
                 
-                // Verify checksum
                 let computed_checksum = sha256d(&payload);
                 if header.checksum != computed_checksum[0..4] {
                     return Err(std::io::Error::new(ErrorKind::InvalidData, "Invalid checksum"));
