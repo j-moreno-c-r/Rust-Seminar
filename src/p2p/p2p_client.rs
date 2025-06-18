@@ -429,7 +429,7 @@ impl BitcoinClient {
                     let _ = tx.send(format!("⬇️ Received: {} ({} bytes)", command, payload.len()));
 
                     // Opcional: envie mais detalhes se quiser
-                    // self.handle_message(&command, &payload)?;
+                    self.handle_message(&command, &payload)?;
 
                     if self.version_received && self.verack_received && !self.handshake_complete {
                         let _ = tx.send("\n🤝 Handshake complete!".to_string());

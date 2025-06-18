@@ -52,6 +52,7 @@ impl Command {
     }
 }
 
+
 pub struct InteractiveCli {
     client: Option<BitcoinClient>,
     config: Cli,
@@ -59,6 +60,7 @@ pub struct InteractiveCli {
     client_thread: Option<JoinHandle<()>>,
     client_running: Arc<AtomicBool>,
     client_rx: Option<Receiver<String>>,
+    bg_printer: Option<JoinHandle<()>>,
 }
 
 impl InteractiveCli {
@@ -70,6 +72,7 @@ impl InteractiveCli {
             client_thread: None,
             client_running: Arc::new(AtomicBool::new(false)),
             client_rx: None,
+            bg_printer: None,
         }
     }
 
@@ -78,12 +81,7 @@ impl InteractiveCli {
         println!("{}", "Digite 'help' para ver os comandos disponíveis".italic());
 
         while self.running {
-            // Exibe mensagens do cliente, se houver
-            if let Some(rx) = &self.client_rx {
-                while let Ok(msg) = rx.try_recv() {
-                    println!("{}", msg);
-                }
-            }
+            // Não precisa mais exibir mensagens aqui, pois a thread BG faz isso
 
             print!("\n> ");
             io::stdout().flush()?;
@@ -98,7 +96,24 @@ impl InteractiveCli {
             self.handle_command(command)?;
         }
 
+        // Ao sair, pare a thread de impressão BG
+        if let Some(bg) = self.bg_printer.take() {
+            let _ = bg.join();
+        }
+
         Ok(())
+    }
+
+        fn start_bg_printer(&mut self) {
+        if let Some(rx) = self.client_rx.take() {
+            self.bg_printer = Some(std::thread::spawn(move || {
+                while let Ok(msg) = rx.recv() {
+                    println!("\n{}", msg);
+                    print!("> ");
+                    let _ = std::io::stdout().flush();
+                }
+            }));
+        }
     }
 
     fn handle_command(&mut self, command: Command) -> io::Result<()> {
@@ -181,6 +196,10 @@ impl InteractiveCli {
                         self.client_thread = Some(client_thread);
                         self.client = Some(client);
                         self.client_rx = Some(rx);
+
+                        // Inicie a thread de impressão BG aqui
+                        self.start_bg_printer();
+
                         println!("✅ Cliente iniciado em background");
                     }
                     Err(e) => println!("❌ Erro no handshake: {}", e),
@@ -201,6 +220,12 @@ impl InteractiveCli {
 
             client.soft_stop()?;
             self.client_rx = None;
+
+            // Pare a thread de impressão BG
+            if let Some(bg) = self.bg_printer.take() {
+                let _ = bg.join();
+            }
+
             println!("🛑 Cliente Bitcoin P2P parado.");
         } else {
             println!("⚠️  Cliente não está rodando.");
