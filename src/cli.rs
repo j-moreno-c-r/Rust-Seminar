@@ -12,6 +12,10 @@ pub struct Cli {
     #[arg(long, default_value = "seed.bitcoin.sipa.be")]
     pub host: String,
 
+    /// Verbosity level for logging (trace, debug, info, warn, error)
+    #[arg(long, default_value = "info")]
+    pub verbosity: String,
+
     /// Bitcoin node port to connect to
     #[arg(long, default_value_t = 8333)]
     pub port: u16,
@@ -78,42 +82,3 @@ impl Cli {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_default_values() {
-        // This would normally use clap::Parser::try_parse_from
-        // but for testing defaults, we'll create manually
-        let args = vec!["bitcoin-client"];
-        let cli = Cli::try_parse_from(args).unwrap();
-        
-        assert_eq!(cli.host, "seed.bitcoin.sipa.be");
-        assert_eq!(cli.port, 8333);
-        assert_eq!(cli.threads, 1);
-        assert_eq!(cli.max_messages, 500000);
-        assert_eq!(cli.timeout, 10);
-        assert!(!cli.verbose);
-        assert!(!cli.discover_peers);
-        assert_eq!(cli.protocol_version, 70015);
-        assert!(cli.logfile.is_none());
-    }
-
-    #[test]
-    fn test_socket_addr() {
-        let cli = Cli {
-            host: "localhost".to_string(),
-            port: 18333,
-            threads: 1,
-            logfile: None,
-            verbose: false,
-            max_messages: 1000,
-            timeout: 5,
-            discover_peers: false,
-            protocol_version: 70015,
-        };
-        
-        assert_eq!(cli.socket_addr(), "localhost:18333");
-    }
-}

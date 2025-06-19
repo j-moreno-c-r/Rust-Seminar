@@ -4,8 +4,8 @@ use std::io::{Write, Read, ErrorKind};
 use crate::p2p::messageheader::MessageHeader;
 use crate::p2p::utils::{sha256d, MAGIC, parse_inv_message,parse_addr_message ,build_version_payload,build_getdata_payload};
 use crate::p2p::database::{PeerDatabase};
+use crate::p2p::log::{LogLevel, Event, log, LogMessage};
 use std::sync::mpsc::Sender;
-
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InventoryType {
@@ -56,7 +56,6 @@ pub struct InventoryItem {
 
 impl InventoryItem {
     pub fn hash_hex(&self) -> String {
-        // Bitcoin displays hashes in reverse byte order (little endian)
         let mut reversed = self.hash;
         reversed.reverse();
         hex::encode(reversed)
@@ -72,12 +71,12 @@ pub struct BitcoinClient {
     verack_received: bool,
     seen_inventory: std::collections::HashSet<[u8; 32]>,
     pub peer_db: PeerDatabase,
-
+    pub log_tx: Option<Sender<LogMessage>>,
 }
 
 impl BitcoinClient {
-    pub fn new() -> Self {
-        let peer_db = PeerDatabase::load_from_file("peers.json"); // <-- Carrega do disco
+    pub fn new_with_logger(log_tx: Sender<LogMessage>) -> Self {
+        let peer_db = PeerDatabase::load_from_file("peers.json");
         BitcoinClient {
             stream: None,
             connected_addr: None,
@@ -85,118 +84,74 @@ impl BitcoinClient {
             version_received: false,
             verack_received: false,
             seen_inventory: std::collections::HashSet::new(),
-            peer_db, 
+            peer_db,
+            log_tx: Some(log_tx),
         }
     }
-    
-    pub fn run(&mut self) -> std::io::Result<()> {
-        println!("🚀 Starting Bitcoin P2P Client");
 
-        self.connect()?;
-        self.start_handshake()?;
-        self.message_loop()?;
-
-        self.peer_db.save_to_file("peers.json");
-
-        Ok(())
+    pub fn new() -> Self {
+        let peer_db = PeerDatabase::load_from_file("peers.json");
+        BitcoinClient {
+            stream: None,
+            connected_addr: None,
+            handshake_complete: false,
+            version_received: false,
+            verack_received: false,
+            seen_inventory: std::collections::HashSet::new(),
+            peer_db,
+            log_tx: None,
+        }
     }
-    
+
     pub fn connect(&mut self) -> std::io::Result<()> {
-        println!("\n🔍 Resolving seed.bitcoin.sipa.be:8333...");
-        let socket_addrs: Vec<_> = "seed.bitcoin.sipa.be:8333"
-            .to_socket_addrs()?
-            .collect();
-        
-        println!("📍 Resolved addresses:");
-        for (i, addr) in socket_addrs.iter().enumerate() {
-            println!("  {}: {} ({})", i + 1, addr, 
-                     if addr.is_ipv4() { "IPv4" } else { "IPv6" });
+        let addr_str = "seed.bitcoin.sipa.be:8333";
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Info, Event::Custom(format!("Resolvendo {}", addr_str)));
         }
-        
+        let socket_addrs: Vec<_> = addr_str.to_socket_addrs()?.collect();
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Debug, Event::Custom(format!("Endereços resolvidos: {:?}", socket_addrs)));
+        }
         for addr in &socket_addrs {
-            println!("\n🔌 Attempting to connect to {}...", addr);
+            if let Some(ref tx) = self.log_tx {
+                log(tx, LogLevel::Info, Event::Custom(format!("Tentando conectar em {}", addr)));
+            }
             match TcpStream::connect_timeout(addr, Duration::from_secs(10)) {
                 Ok(s) => {
-                    println!("✅ Connected successfully!");
+                    if let Some(ref tx) = self.log_tx {
+                        log(tx, LogLevel::Info, Event::Connected(*addr));
+                    }
                     s.set_read_timeout(Some(Duration::from_secs(30)))?;
                     self.stream = Some(s);
                     self.connected_addr = Some(*addr);
                     break;
                 }
                 Err(e) => {
-                    println!("❌ Failed to connect: {}", e);
+                    if let Some(ref tx) = self.log_tx {
+                        log(tx, LogLevel::Warn, Event::FailedConnection(*addr, e.to_string()));
+                    }
                     continue;
                 }
             }
         }
-        
         if self.stream.is_none() {
+            if let Some(ref tx) = self.log_tx {
+                log(tx, LogLevel::Error, Event::Custom("Não foi possível conectar a nenhum endereço".into()));
+            }
             return Err(std::io::Error::new(ErrorKind::ConnectionRefused, "Could not connect to any address"));
         }
-        
-        println!("🎯 Using connection to: {}", self.connected_addr.unwrap());
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Info, Event::Custom(format!("Conexão estabelecida com {}", self.connected_addr.unwrap())));
+        }
         Ok(())
     }
     
     pub fn start_handshake(&mut self) -> std::io::Result<()> {
-        println!("\n📤 Sending version message...");
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Debug, Event::Custom("Enviando mensagem version".into()));
+        }
         let version_payload = build_version_payload(self.connected_addr.unwrap());
         self.send_message("version", &version_payload)?;
-        Ok(())
-    }
-    
-    pub fn message_loop(&mut self) -> std::io::Result<()> {
-        let mut getaddr_sent = false;
-        let mut message_count = 0;
-        let max_messages = 500000; 
-        
-        loop {
-            message_count += 1;
-            if message_count > max_messages {
-                println!("\n🎯 Processed {} messages, ending demo", max_messages);
-                break;
-            }
-            
-            if !self.is_connection_alive()? {
-                println!("🔌 Connection closed by peer");
-                break;
-            }
-            
-            match self.read_message() {
-                Ok(Some((header, payload))) => {
-                    let command = header.command_str();
-                    println!("⬇️ Received: {} ({} bytes)", command, payload.len());
-                    
-                    self.handle_message(&command, &payload)?;
-                    
-                    // Send getaddr after handshake completes, but only once
-                    if self.version_received && self.verack_received && !self.handshake_complete {
-                        println!("\n🤝 Handshake complete!");
-                        self.handshake_complete = true;
-                    }
-                    
-                    if self.handshake_complete && !getaddr_sent {
-                        println!("📤 Requesting peer addresses...");
-                        self.send_message("getaddr", &[])?;
-                        getaddr_sent = true;
-                    }
-                }
-                Ok(_none) => {
-                    // No message available, small delay
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                Err(e) => {
-                    println!("❌ Error reading message: {}", e);
-                    break;
-                }
-            }
-            
-            // If we've completed handshake and sent getaddr, wait a bit more for responses
-            if self.handshake_complete && getaddr_sent {
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        }
-        
         Ok(())
     }
     
@@ -393,18 +348,18 @@ impl BitcoinClient {
             Ok(None)
         }
     }
-    pub fn soft_stop(&mut self) -> std::io::Result<()> {
-        if let Some(stream) = &mut self.stream {
-            stream.shutdown(std::net::Shutdown::Both)?;
-        }
-        self.stream = None;
-        self.connected_addr = None;
-        self.handshake_complete = false;
-        self.version_received = false;
-        self.verack_received = false;
-        Ok(())
+    
+pub fn soft_stop(&mut self) -> std::io::Result<()> {
+    if let Some(stream) = &mut self.stream {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
     }
-
+    self.stream = None;
+    self.connected_addr = None;
+    self.handshake_complete = false;
+    self.version_received = false;
+    self.verack_received = false;
+    Ok(())
+}
     pub fn message_loop_with_channel(&mut self, tx: &Sender<String>) -> std::io::Result<()> {
         let mut getaddr_sent = false;
         let mut message_count = 0;
@@ -455,10 +410,10 @@ impl BitcoinClient {
         Ok(())
     }
 }
+
 impl Clone for BitcoinClient {
     fn clone(&self) -> Self {
         BitcoinClient {
-            // Clone o TcpStream usando try_clone()
             stream: self.stream.as_ref().map(|s| s.try_clone().expect("Falha ao clonar stream")),
             connected_addr: self.connected_addr,
             handshake_complete: self.handshake_complete,
@@ -466,6 +421,7 @@ impl Clone for BitcoinClient {
             verack_received: self.verack_received,
             seen_inventory: self.seen_inventory.clone(),
             peer_db: self.peer_db.clone(),
+            log_tx: self.log_tx.clone(),
         }
     }
 }

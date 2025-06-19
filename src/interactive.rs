@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use chrono;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
+use crate::p2p::log::{LogLevel, Event, log, LogMessage};
 
 pub enum Command {
     Start,
@@ -54,7 +55,6 @@ impl Command {
     }
 }
 
-
 pub struct InteractiveCli {
     client: Option<BitcoinClient>,
     config: Cli,
@@ -63,9 +63,22 @@ pub struct InteractiveCli {
     client_running: Arc<AtomicBool>,
     client_rx: Option<Receiver<String>>,
     bg_printer: Option<JoinHandle<()>>,
+    log_tx: Sender<LogMessage>,
 }
 
 impl InteractiveCli {
+    pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
+        Self {
+            client: None,
+            config,
+            running: true,
+            client_thread: None,
+            client_running: Arc::new(AtomicBool::new(false)),
+            client_rx: None,
+            bg_printer: None,
+            log_tx,
+        }
+    }
     pub fn new() -> Self {
         Self {
             client: None,
@@ -75,6 +88,7 @@ impl InteractiveCli {
             client_running: Arc::new(AtomicBool::new(false)),
             client_rx: None,
             bg_printer: None,
+            log_tx: panic!("Use new_with_logger para inicializar com logging!"),
         }
     }
 
@@ -83,8 +97,6 @@ impl InteractiveCli {
         println!("{}", "Digite 'help' para ver os comandos disponíveis".italic());
 
         while self.running {
-            // Não precisa mais exibir mensagens aqui, pois a thread BG faz isso
-
             print!("\n> ");
             io::stdout().flush()?;
 
@@ -98,7 +110,6 @@ impl InteractiveCli {
             self.handle_command(command)?;
         }
 
-        // Ao sair, pare a thread de impressão BG
         if let Some(bg) = self.bg_printer.take() {
             let _ = bg.join();
         }
@@ -106,7 +117,7 @@ impl InteractiveCli {
         Ok(())
     }
 
-        fn start_bg_printer(&mut self) {
+    fn start_bg_printer(&mut self) {
         if let Some(rx) = self.client_rx.take() {
             self.bg_printer = Some(std::thread::spawn(move || {
                 while let Ok(msg) = rx.recv() {
@@ -174,11 +185,9 @@ impl InteractiveCli {
             println!("⚠️  Cliente já está rodando!");
             return Ok(());
         }
+        log(&self.log_tx, LogLevel::Info, Event::Custom("Iniciando cliente Bitcoin P2P".into()));
 
-        println!("🚀 Iniciando cliente Bitcoin P2P...");
-        println!("📡 Conectando a {}:{}", self.config.host, self.config.port);
-
-        let mut client = BitcoinClient::new();
+        let mut client = BitcoinClient::new_with_logger(self.log_tx.clone());
         match client.connect() {
             Ok(_) => {
                 match client.start_handshake() {
@@ -204,15 +213,20 @@ impl InteractiveCli {
                         self.client = Some(client);
                         self.client_rx = Some(rx);
 
-                        // Inicie a thread de impressão BG aqui
                         self.start_bg_printer();
 
                         println!("✅ Cliente iniciado em background");
                     }
-                    Err(e) => println!("❌ Erro no handshake: {}", e),
+                    Err(e) => {
+                        log(&self.log_tx, LogLevel::Error, Event::Custom(format!("Erro no handshake: {}", e)));
+                        println!("❌ Erro no handshake: {}", e);
+                    }
                 }
             }
-            Err(e) => println!("❌ Erro ao conectar: {}", e),
+            Err(e) => {
+                log(&self.log_tx, LogLevel::Error, Event::Custom(format!("Erro ao conectar: {}", e)));
+                println!("❌ Erro ao conectar: {}", e);
+            }
         }
         Ok(())
     }
@@ -228,11 +242,11 @@ impl InteractiveCli {
             client.soft_stop()?;
             self.client_rx = None;
 
-            // Pare a thread de impressão BG
             if let Some(bg) = self.bg_printer.take() {
                 let _ = bg.join();
             }
 
+            log(&self.log_tx, LogLevel::Info, Event::Custom("Cliente Bitcoin P2P parado.".into()));
             println!("🛑 Cliente Bitcoin P2P parado.");
         } else {
             println!("⚠️  Cliente não está rodando.");
