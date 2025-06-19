@@ -79,18 +79,6 @@ impl InteractiveCli {
             log_tx,
         }
     }
-    pub fn new() -> Self {
-        Self {
-            client: None,
-            config: Cli::parse(),
-            running: true,
-            client_thread: None,
-            client_running: Arc::new(AtomicBool::new(false)),
-            client_rx: None,
-            bg_printer: None,
-            log_tx: panic!("Use new_with_logger para inicializar com logging!"),
-        }
-    }
 
     pub fn run(&mut self) -> io::Result<()> {
         println!("{}", "🚀 Bitcoin P2P Cliente Interativo".bold().green());

@@ -13,16 +13,6 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            LogLevel::Trace => "TRACE",
-            LogLevel::Debug => "DEBUG",
-            LogLevel::Info  => "INFO",
-            LogLevel::Warn  => "WARN",
-            LogLevel::Error => "ERROR",
-        }
-    }
-
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "trace" => Some(LogLevel::Trace),
@@ -39,8 +29,8 @@ impl LogLevel {
 pub enum Event {
     Connected(SocketAddr),
     FailedConnection(SocketAddr, String),
-    PeerDiscovered(SocketAddr),
-    SavedToDisk(usize),
+    _PeerDiscovered(SocketAddr),
+    _SavedToDisk(usize),
     Custom(String),
 }
 
@@ -49,8 +39,8 @@ impl fmt::Display for Event {
         match self {
             Event::Connected(addr) => write!(f, "Conectado ao peer {}", addr),
             Event::FailedConnection(addr, reason) => write!(f, "Falha ao conectar em {}: {}", addr, reason),
-            Event::PeerDiscovered(addr) => write!(f, "Novo peer descoberto: {}", addr),
-            Event::SavedToDisk(count) => write!(f, "Banco de dados salvo ({} peers)", count),
+            Event::_PeerDiscovered(addr) => write!(f, "Novo peer descoberto: {}", addr),
+            Event::_SavedToDisk(count) => write!(f, "Banco de dados salvo ({} peers)", count),
             Event::Custom(msg) => write!(f, "{}", msg),
         }
     }

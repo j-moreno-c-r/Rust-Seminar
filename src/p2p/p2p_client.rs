@@ -89,20 +89,6 @@ impl BitcoinClient {
         }
     }
 
-    pub fn new() -> Self {
-        let peer_db = PeerDatabase::load_from_file("peers.json");
-        BitcoinClient {
-            stream: None,
-            connected_addr: None,
-            handshake_complete: false,
-            version_received: false,
-            verack_received: false,
-            seen_inventory: std::collections::HashSet::new(),
-            peer_db,
-            log_tx: None,
-        }
-    }
-
     pub fn connect(&mut self) -> std::io::Result<()> {
         let addr_str = "seed.bitcoin.sipa.be:8333";
         if let Some(ref tx) = self.log_tx {
