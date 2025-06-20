@@ -396,7 +396,7 @@ impl BitcoinClient {
         Ok(())
     }
 
-    pub async fn connect_async(&mut self) -> std::io::Result<()> {
+    pub async fn _connect_async(&mut self) -> std::io::Result<()> {
     use tokio::net::TcpStream as TokioTcpStream; 
 
     let addr_str = "seed.bitcoin.sipa.be:8333";
@@ -412,7 +412,7 @@ impl BitcoinClient {
             log(tx, LogLevel::Info, Event::Custom(format!("Tentando conectar em {}", addr)));
         }
         match TokioTcpStream::connect(addr).await {
-            Ok(s) => {
+            Ok(_s) => {
                 if let Some(ref tx) = self.log_tx {
                     log(tx, LogLevel::Info, Event::Connected(*addr));
                 }
