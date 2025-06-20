@@ -397,7 +397,7 @@ impl BitcoinClient {
     }
 
     pub async fn connect_async(&mut self) -> std::io::Result<()> {
-    use tokio::net::TcpStream as TokioTcpStream; // Importa apenas aqui
+    use tokio::net::TcpStream as TokioTcpStream; 
 
     let addr_str = "seed.bitcoin.sipa.be:8333";
     if let Some(ref tx) = self.log_tx {

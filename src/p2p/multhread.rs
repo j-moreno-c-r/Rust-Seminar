@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 pub async fn crawl_peer(addr: SocketAddr) {
     match TcpStream::connect(addr).await {
-        Ok(mut stream) => {
+        Ok(mut _stream) => {
             println!("✅ Conectado a {}", addr);
         }
         Err(e) => {

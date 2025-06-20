@@ -18,6 +18,7 @@ pub enum Command {
     SetHost(String),
     SetPort(u16),
     ListPeers,
+    Crawl, 
     Help,
     Exit,
     Clear,
@@ -25,7 +26,7 @@ pub enum Command {
 }
 
 impl Command {
-    fn from_str(input: &str) -> Self {
+     fn from_str(input: &str) -> Self {
         let parts: Vec<&str> = input.trim().split_whitespace().collect();
         match parts.get(0).map(|s| *s) {
             Some("start") => Command::Start,
@@ -47,6 +48,7 @@ impl Command {
                 }
             }
             Some("peers") => Command::ListPeers,
+            Some("crawl") => Command::Crawl,
             Some("help") => Command::Help,
             Some("exit") | Some("quit") => Command::Exit,
             Some("clear") => Command::Clear,
@@ -133,6 +135,8 @@ impl InteractiveCli {
                 println!("✅ Porta atualizada para: {}", self.config.port);
             }
             Command::ListPeers => self.list_peers(),
+            Command::Crawl => self.run_crawler_command()?, 
+
             Command::Clear => {
                 print!("\x1B[2J\x1B[1;1H");
                 io::stdout().flush()?;
@@ -160,6 +164,7 @@ impl InteractiveCli {
         println!("   sethost <host>    - Define o host para conexão");
         println!("   setport <port>    - Define a porta para conexão");
         println!("   peers             - Lista os peers conhecidos");
+        println!("   crawl             - Faz crawl paralelo dos peers conhecidos");
         println!("   clear             - Limpa a tela"); 
         println!("   exit              - Sai do programa");
     }
@@ -269,4 +274,27 @@ impl InteractiveCli {
             None => println!("❌ Cliente não está rodando"),
         }
     }
+
+    fn run_crawler_command(&mut self) -> io::Result<()> {
+    use crate::p2p::multhread::run_crawlers;
+    use std::net::SocketAddr;
+
+    let peers: Vec<SocketAddr> = self.client
+        .as_ref()
+        .map(|c| c.peer_db.peers.keys().cloned().collect())
+        .unwrap_or_default();
+
+    if peers.is_empty() {
+        println!("Nenhum peer conhecido para crawl.");
+        return Ok(());
+    }
+
+    println!("Iniciando crawl em {} peers...", peers.len());
+
+    // Executa o crawler em um runtime tokio temporário
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(run_crawlers(peers));
+
+    Ok(())
+}
 }
