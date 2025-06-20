@@ -298,7 +298,6 @@ impl BitcoinClient {
     
     fn read_message(&mut self) -> std::io::Result<Option<(MessageHeader, Vec<u8>)>> {
         if let Some(stream) = &mut self.stream {
-            // Try to read header first - use non-blocking for availability check
             stream.set_nonblocking(true)?;
             let mut header_buf = [0u8; 24];
             let header_result = stream.read_exact(&mut header_buf);
@@ -335,17 +334,18 @@ impl BitcoinClient {
         }
     }
     
-pub fn soft_stop(&mut self) -> std::io::Result<()> {
-    if let Some(stream) = &mut self.stream {
-        let _ = stream.shutdown(std::net::Shutdown::Both);
+    pub fn soft_stop(&mut self) -> std::io::Result<()> {
+        if let Some(stream) = &mut self.stream {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+        self.stream = None;
+        self.connected_addr = None;
+        self.handshake_complete = false;
+        self.version_received = false;
+        self.verack_received = false;
+        Ok(())
     }
-    self.stream = None;
-    self.connected_addr = None;
-    self.handshake_complete = false;
-    self.version_received = false;
-    self.verack_received = false;
-    Ok(())
-}
+   
     pub fn message_loop_with_channel(&mut self, tx: &Sender<String>) -> std::io::Result<()> {
         let mut getaddr_sent = false;
         let mut message_count = 0;
@@ -395,6 +395,50 @@ pub fn soft_stop(&mut self) -> std::io::Result<()> {
         }
         Ok(())
     }
+
+    pub async fn connect_async(&mut self) -> std::io::Result<()> {
+    use tokio::net::TcpStream as TokioTcpStream; // Importa apenas aqui
+
+    let addr_str = "seed.bitcoin.sipa.be:8333";
+    if let Some(ref tx) = self.log_tx {
+        log(tx, LogLevel::Info, Event::Custom(format!("Resolvendo {}", addr_str)));
+    }
+    let socket_addrs: Vec<_> = tokio::net::lookup_host(addr_str).await?.collect();
+    if let Some(ref tx) = self.log_tx {
+        log(tx, LogLevel::Debug, Event::Custom(format!("Endereços resolvidos: {:?}", socket_addrs)));
+    }
+    for addr in &socket_addrs {
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Info, Event::Custom(format!("Tentando conectar em {}", addr)));
+        }
+        match TokioTcpStream::connect(addr).await {
+            Ok(s) => {
+                if let Some(ref tx) = self.log_tx {
+                    log(tx, LogLevel::Info, Event::Connected(*addr));
+                }
+                self.connected_addr = Some(*addr);
+                break;
+            }
+            Err(e) => {
+                if let Some(ref tx) = self.log_tx {
+                    log(tx, LogLevel::Warn, Event::FailedConnection(*addr, e.to_string()));
+                }
+                continue;
+            }
+        }
+    }
+    if self.connected_addr.is_none() {
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Error, Event::Custom("Não foi possível conectar a nenhum endereço".into()));
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "Could not connect to any address"));
+    }
+    if let Some(ref tx) = self.log_tx {
+        log(tx, LogLevel::Info, Event::Custom(format!("Conexão estabelecida com {}", self.connected_addr.unwrap())));
+    }
+    Ok(())
+}
+    
 }
 
 impl Clone for BitcoinClient {
