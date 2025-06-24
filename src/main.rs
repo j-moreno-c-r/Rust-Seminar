@@ -1,5 +1,6 @@
 mod p2p;
 mod cli;
+mod tests;
 mod interactive;
 
 use interactive::InteractiveCli;
