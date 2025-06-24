@@ -16,6 +16,7 @@
           buildInputs = [
             pkgs.rustc
             pkgs.cargo
+            pkgs.git
             pkgs.openssl
             pkgs.pkg-config
             pkgs.clang

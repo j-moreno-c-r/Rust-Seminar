@@ -8,7 +8,7 @@ use p2p::log::{Logger, LogLevel};
 fn main() -> std::io::Result<()> {
     let config = cli::Cli::parse();
 
-    let min_level = LogLevel::from_str(&config.verbosity).unwrap_or(LogLevel::Info);
+    let min_level = LogLevel::from_str(&config.verbosity).unwrap_or(LogLevel::Trace);
 
     let (log_tx, log_rx) = std::sync::mpsc::channel();
 

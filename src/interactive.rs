@@ -3,12 +3,13 @@ use crate::p2p::p2p_client::BitcoinClient;
 use crate::cli::Cli;
 use colored::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc,Mutex};
 use std::thread::{self, JoinHandle};
-use crate::p2p::multhread::run_crawlers;
 use std::net::SocketAddr;
 use std::sync::mpsc::{self, Receiver, Sender};
 use crate::p2p::log::{LogLevel, Event, log, LogMessage};
+use crate::p2p::multhread::{multhread_db, run_crawlers_with_log};
+use std::collections::HashSet;
 
 pub enum Command {
     Start,
@@ -66,11 +67,13 @@ pub struct InteractiveCli {
     client_rx: Option<Receiver<String>>,
     bg_printer: Option<JoinHandle<()>>,
     log_tx: Sender<LogMessage>,
+    crawl_connected: Arc<Mutex<HashSet<SocketAddr>>>, 
+
 }
 
 impl InteractiveCli {
-    pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
-        Self {
+pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
+    Self {
             client: None,
             config,
             running: true,
@@ -79,8 +82,9 @@ impl InteractiveCli {
             client_rx: None,
             bg_printer: None,
             log_tx,
-        }
+            crawl_connected: Arc::new(Mutex::new(HashSet::new())),
     }
+}
 
     pub fn run(&mut self) -> io::Result<()> {
     println!("{}", "🚀 Bitcoin P2P Cliente Interativo".bold().green());
@@ -256,13 +260,23 @@ impl InteractiveCli {
     }
 
     fn show_status(&self) {
-        if self.client.is_some() && self.client_running.load(Ordering::SeqCst) {
-            println!("✅ Cliente está rodando");
-            println!("   Host: {}", self.config.host);
-            println!("   Porta: {}", self.config.port);
-        } else {
-            println!("❌ Cliente não está rodando");
+    if self.client.is_some() && self.client_running.load(Ordering::SeqCst) {
+        println!("✅ Cliente está rodando");
+        println!("   Host: {}", self.config.host);
+        println!("   Porta: {}", self.config.port);
+    } else {
+        println!("❌ Cliente não está rodando");
+    }
+    // Mostrar peers conectados pelo crawl
+    let crawl_peers = self.crawl_connected.lock().unwrap();
+    if !crawl_peers.is_empty() {
+        println!("🌐 Peers conectados pelo crawl:");
+        for addr in crawl_peers.iter() {
+            println!("   {}", addr);
         }
+    } else {
+        println!("🌐 Nenhum peer conectado pelo crawl.");
+    }
     }
 
     fn list_peers(&self) {
@@ -308,16 +322,17 @@ impl InteractiveCli {
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Falha ao criar runtime tokio");
         rt.block_on(async move {
-            crate::p2p::multhread::database_task(db, db_rx, db_path).await;
+            multhread_db(db, db_rx, db_path).await;
         });
     });
 
     let db_tx_crawlers = db_tx.clone();
+    let crawl_connected = self.crawl_connected.clone();
     thread::spawn(move || {
         match tokio::runtime::Runtime::new() {
             Ok(rt) => {
                 if let Err(e) = std::panic::catch_unwind(|| {
-                    rt.block_on(crate::p2p::multhread::run_crawlers_with_log(peers, db_tx_crawlers, log_tx));
+                    rt.block_on(run_crawlers_with_log(peers, db_tx_crawlers, log_tx, crawl_connected));
                 }) {
                     println!("❌ Erro ao executar crawler: {:?}", e);
                 }
@@ -326,7 +341,7 @@ impl InteractiveCli {
                 println!("❌ Erro ao criar runtime tokio: {}", e);
             }
         }
-        println!("Crawl finalizado.");
+        println!("Crawl finalizado.❗❗❗");
     });
 
     Ok(())

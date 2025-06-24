@@ -7,7 +7,7 @@
 
 * 4 => Database,  In this week i implement a basic way to armazenate this peers in json file, with a status of what i alredy fo with this json and if it still alives or i alredy try a connection to him... ✅
 
-* 5 => Multhread ❗✅ => working but dont send messages 
+* 5 => Multhread ❗✅ => working but dont send messages, soo it will be closed by timeout
 
 * 6 => Log system ❗✅ => working but can be better maybe remove emojis, and needs to have the feedback of handshake of the multthread connections.
 
