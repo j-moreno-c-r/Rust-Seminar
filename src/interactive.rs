@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use crate::p2p::multhread::run_crawlers;
 use std::net::SocketAddr;
-use chrono;
 use std::sync::mpsc::{self, Receiver, Sender};
 use crate::p2p::log::{LogLevel, Event, log, LogMessage};
 
@@ -28,8 +27,8 @@ pub enum Command {
 
 impl Command {
      fn from_str(input: &str) -> Self {
-        let parts: Vec<&str> = input.trim().split_whitespace().collect();
-        match parts.get(0).map(|s| *s) {
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        match parts.first().copied() {
             Some("start") => Command::Start,
             Some("stop") => Command::Stop,
             Some("status") => Command::Status,

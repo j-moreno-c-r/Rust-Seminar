@@ -339,9 +339,9 @@ impl BitcoinClient {
             Ok(None)
         }
     }
+    
     pub fn soft_stop(&mut self) -> std::io::Result<()> {
         if let Some(ref mut stream) = self.stream {
-            // Fecha a conexão TCP
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         self.stream = None;
@@ -351,10 +351,9 @@ impl BitcoinClient {
         self.verack_received = false;
         self.seen_inventory.clear();
         Ok(())
-    }
-    
+    } 
    
-pub fn message_loop_with_channel(&mut self, tx: &Sender<String>, running: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<()>{        let mut getaddr_sent = false;
+    pub fn message_loop_with_channel(&mut self, tx: &Sender<String>, running: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<()>{        let mut getaddr_sent = false;
         let mut message_count = 0;
         let max_messages = 500000;
 

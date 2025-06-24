@@ -9,8 +9,8 @@
 
 * 5 => Multhread ❗=> working but bugged crashes when i refuse one of the mult crawled connection and i need the information of crawled connected nodes on my status
 
-* 6 => Log system ❗=> working but can be better maybe remove emojis, and needs to have the feedback of handshake of the multthread connections.
+* 6 => Log system ❗✅ => working but can be better maybe remove emojis, and needs to have the feedback of handshake of the multthread connections.
 
 * 7 => dns seeder by ip
 
-* 8 => RPC start, stop .... ❗ => stop sometimes are crashing...
+* 8 => RPC start, stop .... ✅
