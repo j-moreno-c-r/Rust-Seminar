@@ -284,38 +284,51 @@ impl InteractiveCli {
     }
     
     fn run_crawler_command(&mut self) -> io::Result<()> {
-        let mut peers: Vec<SocketAddr> = self.client
-            .as_ref()
-            .map(|c| c.peer_db.peers.keys().cloned().collect())
-            .unwrap_or_default();
-    
-        if peers.is_empty() {
-            println!("Nenhum peer conhecido para crawl.");
-            return Ok(());
-        }
-    
-        if peers.len() > 4 {
-            peers.truncate(4);
-        }
-    
-        println!("Iniciando crawl em {} peers (em background)...", peers.len());
-    
-        thread::spawn(move || {
-            match tokio::runtime::Runtime::new() {
-                Ok(rt) => {
-                    if let Err(e) = std::panic::catch_unwind(|| {
-                        rt.block_on(run_crawlers(peers));
-                    }) {
-                        println!("❌ Erro ao executar crawler: {:?}", e);
-                    }
-                }
-                Err(e) => {
-                    println!("❌ Erro ao criar runtime tokio: {}", e);
+    let mut peers: Vec<SocketAddr> = self.client
+        .as_ref()
+        .map(|c| c.peer_db.peers.keys().cloned().collect())
+        .unwrap_or_default();
+
+    if peers.is_empty() {
+        println!("Nenhum peer conhecido para crawl.");
+        return Ok(());
+    }
+
+    if peers.len() > 4 {
+        peers.truncate(4);
+    }
+
+    println!("Iniciando crawl em {} peers (em background)...", peers.len());
+
+    let (db_tx, db_rx) = tokio::sync::mpsc::channel(32);
+    let db = self.client.as_ref().map(|c| c.peer_db.clone()).unwrap_or_default();
+    let db_path = "peers.json";
+    let log_tx = self.log_tx.clone();
+
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Falha ao criar runtime tokio");
+        rt.block_on(async move {
+            crate::p2p::multhread::database_task(db, db_rx, db_path).await;
+        });
+    });
+
+    let db_tx_crawlers = db_tx.clone();
+    thread::spawn(move || {
+        match tokio::runtime::Runtime::new() {
+            Ok(rt) => {
+                if let Err(e) = std::panic::catch_unwind(|| {
+                    rt.block_on(crate::p2p::multhread::run_crawlers_with_log(peers, db_tx_crawlers, log_tx));
+                }) {
+                    println!("❌ Erro ao executar crawler: {:?}", e);
                 }
             }
-            println!("Crawl finalizado.");
-        });
-    
-        Ok(())
-    }
+            Err(e) => {
+                println!("❌ Erro ao criar runtime tokio: {}", e);
+            }
+        }
+        println!("Crawl finalizado.");
+    });
+
+    Ok(())
+}
 }

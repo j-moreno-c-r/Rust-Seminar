@@ -64,11 +64,21 @@ impl PeerDatabase {
     }
 
     pub fn _update_status(&mut self, addr: SocketAddr, status: PeerStatus) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         if let Some(peer) = self.peers.get_mut(&addr) {
             peer.status = status.clone();
+            peer.last_seen = Some(now);
             if status == PeerStatus::ConnectedRecently {
-                peer.last_connected = Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs());
+                peer.last_connected = Some(now);
             }
+        } else {
+            self.peers.insert(addr, PeerInfo {
+                address: addr,
+                last_seen: Some(now),
+                last_connected: if status == PeerStatus::ConnectedRecently { Some(now) } else { None },
+                status,
+                services: None,
+            });
         }
     }
 }
