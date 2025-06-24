@@ -5,7 +5,8 @@ use colored::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use crate::p2p::multhread::run_crawlers;
+use std::net::SocketAddr;
 use chrono;
 use std::sync::mpsc::{self, Receiver, Sender};
 use crate::p2p::log::{LogLevel, Event, log, LogMessage};
@@ -83,29 +84,36 @@ impl InteractiveCli {
     }
 
     pub fn run(&mut self) -> io::Result<()> {
-        println!("{}", "🚀 Bitcoin P2P Cliente Interativo".bold().green());
-        println!("{}", "Digite 'help' para ver os comandos disponíveis".italic());
+    println!("{}", "🚀 Bitcoin P2P Cliente Interativo".bold().green());
+    println!("{}", "Digite 'help' para ver os comandos disponíveis".italic());
 
-        while self.running {
-            print!("\n> ");
-            io::stdout().flush()?;
+    while self.running {
+        print!("\n> ");
+        io::stdout().flush()?;
 
-            let mut input = String::new();
-            if io::stdin().read_line(&mut input).is_err() {
-                println!("Erro ao ler entrada.");
-                continue;
-            }
-
-            let command = Command::from_str(&input);
-            self.handle_command(command)?;
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            println!("Erro ao ler entrada.");
+            continue;
         }
 
-        if let Some(bg) = self.bg_printer.take() {
-            let _ = bg.join();
+        let command = Command::from_str(&input);
+        if let Err(e) = self.handle_command(command) {
+            println!("❌ Erro ao executar comando: {}", e);
         }
-
-        Ok(())
     }
+
+    self.client_running.store(false, Ordering::SeqCst);
+
+    if let Some(bg) = self.bg_printer.take() {
+        let _ = bg.join();
+    }
+    if let Some(thread) = self.client_thread.take() {
+        let _ = thread.join();
+    }
+
+    Ok(())
+}
 
     fn start_bg_printer(&mut self) {
         if let Some(rx) = self.client_rx.take() {
@@ -193,15 +201,8 @@ impl InteractiveCli {
                         let mut client_clone = client.clone();
 
                         let client_thread = thread::spawn(move || {
-                            while running.load(Ordering::SeqCst) {
-                                if let Err(e) = client_clone.message_loop_with_channel(&tx) {
-                                    let _ = tx.send(format!("❌ Erro no loop de mensagens: {}", e));
-                                    break;
-                                }
-                                thread::sleep(Duration::from_millis(100));
-                            }
+                        let _ = client_clone.message_loop_with_channel(&tx, &running);
                         });
-
                         self.client_thread = Some(client_thread);
                         self.client = Some(client);
                         self.client_rx = Some(rx);
@@ -225,26 +226,34 @@ impl InteractiveCli {
     }
 
     fn stop_client(&mut self) -> io::Result<()> {
-        if let Some(mut client) = self.client.take() {
-            self.client_running.store(false, Ordering::SeqCst);
+    if let Some(mut client) = self.client.take() {
+        self.client_running.store(false, Ordering::SeqCst);
 
             if let Some(thread) = self.client_thread.take() {
-                let _ = thread.join();
+            if let Err(e) = thread.join() {
+                println!("⚠️ Erro ao aguardar thread do cliente: {:?}", e);
             }
+        }
+            if let Err(e) = client.soft_stop() {
+            println!("⚠️ Erro ao parar cliente: {}", e);
+        }
+        self.client_rx = None;
 
             client.soft_stop()?;
             self.client_rx = None;
 
             if let Some(bg) = self.bg_printer.take() {
-                let _ = bg.join();
+            if let Err(e) = bg.join() {
+                println!("⚠️ Erro ao aguardar thread de impressão: {:?}", e);
             }
-
-            log(&self.log_tx, LogLevel::Info, Event::Custom("Cliente Bitcoin P2P parado.".into()));
-            println!("🛑 Cliente Bitcoin P2P parado.");
-        } else {
-            println!("⚠️  Cliente não está rodando.");
         }
-        Ok(())
+
+        log(&self.log_tx, LogLevel::Info, Event::Custom("Cliente Bitcoin P2P parado.".into()));
+        println!("🛑 Cliente Bitcoin P2P parado.");
+    } else {
+        println!("⚠️  Cliente não está rodando.");
+    }
+    Ok(())
     }
 
     fn show_status(&self) {
@@ -276,9 +285,6 @@ impl InteractiveCli {
     }
 
     fn run_crawler_command(&mut self) -> io::Result<()> {
-    use crate::p2p::multhread::run_crawlers;
-    use std::net::SocketAddr;
-
     let peers: Vec<SocketAddr> = self.client
         .as_ref()
         .map(|c| c.peer_db.peers.keys().cloned().collect())
@@ -291,9 +297,18 @@ impl InteractiveCli {
 
     println!("Iniciando crawl em {} peers...", peers.len());
 
-    // Executa o crawler em um runtime tokio temporário
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(run_crawlers(peers));
+    match tokio::runtime::Runtime::new() {
+        Ok(rt) => {
+            if let Err(e) = std::panic::catch_unwind(|| {
+                rt.block_on(run_crawlers(peers));
+            }) {
+                println!("❌ Erro ao executar crawler: {:?}", e);
+            }
+        }
+        Err(e) => {
+            println!("❌ Erro ao criar runtime tokio: {}", e);
+        }
+    }
 
     Ok(())
 }

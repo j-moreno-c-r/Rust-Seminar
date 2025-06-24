@@ -1,11 +1,13 @@
 use std::net::{TcpStream, ToSocketAddrs, SocketAddr};
 use std::time::{Duration};
-use std::io::{Write, Read, ErrorKind};
+use std::io::{Write, Read, ErrorKind, Result, Error};
 use crate::p2p::messageheader::MessageHeader;
 use crate::p2p::utils::{sha256d, MAGIC, parse_inv_message,parse_addr_message ,build_version_payload,build_getdata_payload};
 use crate::p2p::database::{PeerDatabase};
 use crate::p2p::log::{LogLevel, Event, log, LogMessage};
 use std::sync::mpsc::Sender;
+use tokio::net::TcpStream as TokioTcpStream; 
+
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InventoryType {
@@ -89,50 +91,54 @@ impl BitcoinClient {
         }
     }
 
-    pub fn connect(&mut self) -> std::io::Result<()> {
-        let addr_str = "seed.bitcoin.sipa.be:8333";
-        if let Some(ref tx) = self.log_tx {
-            log(tx, LogLevel::Info, Event::Custom(format!("Resolvendo {}", addr_str)));
-        }
-        let socket_addrs: Vec<_> = addr_str.to_socket_addrs()?.collect();
-        if let Some(ref tx) = self.log_tx {
-            log(tx, LogLevel::Debug, Event::Custom(format!("Endereços resolvidos: {:?}", socket_addrs)));
-        }
-        for addr in &socket_addrs {
-            if let Some(ref tx) = self.log_tx {
-                log(tx, LogLevel::Info, Event::Custom(format!("Tentando conectar em {}", addr)));
-            }
-            match TcpStream::connect_timeout(addr, Duration::from_secs(10)) {
-                Ok(s) => {
-                    if let Some(ref tx) = self.log_tx {
-                        log(tx, LogLevel::Info, Event::Connected(*addr));
-                    }
-                    s.set_read_timeout(Some(Duration::from_secs(30)))?;
-                    self.stream = Some(s);
-                    self.connected_addr = Some(*addr);
-                    break;
-                }
-                Err(e) => {
-                    if let Some(ref tx) = self.log_tx {
-                        log(tx, LogLevel::Warn, Event::FailedConnection(*addr, e.to_string()));
-                    }
-                    continue;
-                }
-            }
-        }
-        if self.stream.is_none() {
-            if let Some(ref tx) = self.log_tx {
-                log(tx, LogLevel::Error, Event::Custom("Não foi possível conectar a nenhum endereço".into()));
-            }
-            return Err(std::io::Error::new(ErrorKind::ConnectionRefused, "Could not connect to any address"));
-        }
-        if let Some(ref tx) = self.log_tx {
-            log(tx, LogLevel::Info, Event::Custom(format!("Conexão estabelecida com {}", self.connected_addr.unwrap())));
-        }
-        Ok(())
+    pub fn connect(&mut self) -> Result<()> {
+    let addr_str = "seed.bitcoin.sipa.be:8333";
+    if let Some(ref tx) = self.log_tx {
+        log(tx, LogLevel::Info, Event::Custom(format!("Resolvendo {}", addr_str)));
     }
+    let socket_addrs: Vec<_> = addr_str.to_socket_addrs()?.collect();
+    if let Some(ref tx) = self.log_tx {
+        log(tx, LogLevel::Debug, Event::Custom(format!("Endereços resolvidos: {:?}", socket_addrs)));
+    }
+    let mut connected = false;
+    for addr in &socket_addrs {
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Info, Event::Custom(format!("Tentando conectar em {}", addr)));
+        }
+        match TcpStream::connect_timeout(addr, Duration::from_secs(10)) {
+            Ok(s) => {
+                if let Some(ref tx) = self.log_tx {
+                    log(tx, LogLevel::Info, Event::Connected(*addr));
+                }
+                s.set_read_timeout(Some(Duration::from_secs(30)))?;
+                self.stream = Some(s);
+                self.connected_addr = Some(*addr);
+                connected = true;
+                break;
+            }
+            Err(e) => {
+                if let Some(ref tx) = self.log_tx {
+                    log(tx, LogLevel::Warn, Event::FailedConnection(*addr, e.to_string()));
+                }
+                continue;
+            }
+        }
+    }
+    if !connected {
+        self.stream = None;
+        self.connected_addr = None;
+        if let Some(ref tx) = self.log_tx {
+            log(tx, LogLevel::Error, Event::Custom("Não foi possível conectar a nenhum endereço".into()));
+        }
+        return Err(Error::new(ErrorKind::ConnectionRefused, "Could not connect to any address"));
+    }
+    if let Some(ref tx) = self.log_tx {
+        log(tx, LogLevel::Info, Event::Custom(format!("Conexão estabelecida com {}", self.connected_addr.unwrap())));
+    }
+    Ok(())
+}
     
-    pub fn start_handshake(&mut self) -> std::io::Result<()> {
+    pub fn start_handshake(&mut self) -> Result<()> {
         if let Some(ref tx) = self.log_tx {
             log(tx, LogLevel::Debug, Event::Custom("Enviando mensagem version".into()));
         }
@@ -141,7 +147,7 @@ impl BitcoinClient {
         Ok(())
     }
     
-    fn handle_message(&mut self, command: &str, payload: &[u8]) -> std::io::Result<()> {
+    fn handle_message(&mut self, command: &str, payload: &[u8]) -> Result<()> {
         match command {
             "version" => {
                 println!("   📋 Version message received");
@@ -204,7 +210,7 @@ impl BitcoinClient {
         Ok(())
     }
     
-    fn handle_inv_message(&mut self, payload: &[u8]) -> std::io::Result<()> {
+    fn handle_inv_message(&mut self, payload: &[u8]) -> Result<()> {
         let inventory_items = parse_inv_message(payload);
         
         if inventory_items.is_empty() {
@@ -264,7 +270,7 @@ impl BitcoinClient {
         Ok(())
     }
     
-    fn is_connection_alive(&mut self) -> std::io::Result<bool> {
+    fn is_connection_alive(&mut self) -> Result<bool> {
         if let Some(stream) = &mut self.stream {
             let mut peek_buf = [0u8; 1];
             stream.set_nonblocking(true)?;
@@ -281,7 +287,7 @@ impl BitcoinClient {
         }
     }
     
-    fn send_message(&mut self, command: &str, payload: &[u8]) -> std::io::Result<()> {
+    fn send_message(&mut self, command: &str, payload: &[u8]) -> Result<()> {
         if let Some(stream) = &mut self.stream {
             let header = MessageHeader::new(command, payload);
             let mut message = header.to_bytes();
@@ -296,7 +302,7 @@ impl BitcoinClient {
         Ok(())
     }
     
-    fn read_message(&mut self) -> std::io::Result<Option<(MessageHeader, Vec<u8>)>> {
+    fn read_message(&mut self) -> Result<Option<(MessageHeader, Vec<u8>)>> {
         if let Some(stream) = &mut self.stream {
             stream.set_nonblocking(true)?;
             let mut header_buf = [0u8; 24];
@@ -312,10 +318,10 @@ impl BitcoinClient {
             }
             
             let header = MessageHeader::from_bytes(&header_buf)
-                .ok_or_else(|| std::io::Error::new(ErrorKind::InvalidData, "Invalid message header"))?;
+                .ok_or_else(|| Error::new(ErrorKind::InvalidData, "Invalid message header"))?;
             
             if header.magic != MAGIC {
-                return Err(std::io::Error::new(ErrorKind::InvalidData, "Invalid magic bytes"));
+                return Err(Error::new(ErrorKind::InvalidData, "Invalid magic bytes"));
             }
             
             let mut payload = vec![0u8; header.payload_size as usize];
@@ -324,7 +330,7 @@ impl BitcoinClient {
                 
                 let computed_checksum = sha256d(&payload);
                 if header.checksum != computed_checksum[0..4] {
-                    return Err(std::io::Error::new(ErrorKind::InvalidData, "Invalid checksum"));
+                    return Err(Error::new(ErrorKind::InvalidData, "Invalid checksum"));
                 }
             }
             
@@ -333,9 +339,9 @@ impl BitcoinClient {
             Ok(None)
         }
     }
-    
     pub fn soft_stop(&mut self) -> std::io::Result<()> {
-        if let Some(stream) = &mut self.stream {
+        if let Some(ref mut stream) = self.stream {
+            // Fecha a conexão TCP
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         self.stream = None;
@@ -343,15 +349,20 @@ impl BitcoinClient {
         self.handshake_complete = false;
         self.version_received = false;
         self.verack_received = false;
+        self.seen_inventory.clear();
         Ok(())
     }
+    
    
-    pub fn message_loop_with_channel(&mut self, tx: &Sender<String>) -> std::io::Result<()> {
-        let mut getaddr_sent = false;
+pub fn message_loop_with_channel(&mut self, tx: &Sender<String>, running: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<()>{        let mut getaddr_sent = false;
         let mut message_count = 0;
         let max_messages = 500000;
 
         loop {
+            if !running.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = tx.send("🛑 Parada solicitada pelo usuário".to_string());
+                break;
+            }
             message_count += 1;
             if message_count > max_messages {
                 let _ = tx.send(format!("\n🎯 Processed {} messages, ending demo", max_messages));
@@ -368,7 +379,6 @@ impl BitcoinClient {
                     let command = header.command_str();
                     let _ = tx.send(format!("⬇️ Received: {} ({} bytes)", command, payload.len()));
 
-                    // Opcional: envie mais detalhes se quiser
                     self.handle_message(&command, &payload)?;
 
                     if self.version_received && self.verack_received && !self.handshake_complete {
@@ -396,9 +406,7 @@ impl BitcoinClient {
         Ok(())
     }
 
-    pub async fn _connect_async(&mut self) -> std::io::Result<()> {
-    use tokio::net::TcpStream as TokioTcpStream; 
-
+    pub async fn _connect_async(&mut self) -> Result<()> {
     let addr_str = "seed.bitcoin.sipa.be:8333";
     if let Some(ref tx) = self.log_tx {
         log(tx, LogLevel::Info, Event::Custom(format!("Resolvendo {}", addr_str)));
@@ -431,7 +439,7 @@ impl BitcoinClient {
         if let Some(ref tx) = self.log_tx {
             log(tx, LogLevel::Error, Event::Custom("Não foi possível conectar a nenhum endereço".into()));
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "Could not connect to any address"));
+        return Err(Error::new(ErrorKind::ConnectionRefused, "Could not connect to any address"));
     }
     if let Some(ref tx) = self.log_tx {
         log(tx, LogLevel::Info, Event::Custom(format!("Conexão estabelecida com {}", self.connected_addr.unwrap())));

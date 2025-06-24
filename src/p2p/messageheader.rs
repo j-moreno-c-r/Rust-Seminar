@@ -1,4 +1,3 @@
-
 use crate::p2p::utils::{sha256d, MAGIC};
 #[derive(Debug)]
 pub struct MessageHeader {

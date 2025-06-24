@@ -7,10 +7,10 @@
 
 * 4 => Database,  In this week i implement a basic way to armazenate this peers in json file, with a status of what i alredy fo with this json and if it still alives or i alredy try a connection to him... ✅
 
-* 5 => Multhread
+* 5 => Multhread ❗=> working but bugged crashes when i refuse one of the mult crawled connection and i need the information of crawled connected nodes on my status
 
-* 6 => Log system ❗
+* 6 => Log system ❗=> working but can be better maybe remove emojis, and needs to have the feedback of handshake of the multthread connections.
 
 * 7 => dns seeder by ip
 
-* 8 => RPC start, stop .... ❗
+* 8 => RPC start, stop .... ❗ => stop sometimes are crashing...
