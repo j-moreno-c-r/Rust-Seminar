@@ -282,33 +282,40 @@ impl InteractiveCli {
             None => println!("❌ Cliente não está rodando"),
         }
     }
-
+    
     fn run_crawler_command(&mut self) -> io::Result<()> {
-    let peers: Vec<SocketAddr> = self.client
-        .as_ref()
-        .map(|c| c.peer_db.peers.keys().cloned().collect())
-        .unwrap_or_default();
-
-    if peers.is_empty() {
-        println!("Nenhum peer conhecido para crawl.");
-        return Ok(());
-    }
-
-    println!("Iniciando crawl em {} peers...", peers.len());
-
-    match tokio::runtime::Runtime::new() {
-        Ok(rt) => {
-            if let Err(e) = std::panic::catch_unwind(|| {
-                rt.block_on(run_crawlers(peers));
-            }) {
-                println!("❌ Erro ao executar crawler: {:?}", e);
+        let mut peers: Vec<SocketAddr> = self.client
+            .as_ref()
+            .map(|c| c.peer_db.peers.keys().cloned().collect())
+            .unwrap_or_default();
+    
+        if peers.is_empty() {
+            println!("Nenhum peer conhecido para crawl.");
+            return Ok(());
+        }
+    
+        if peers.len() > 4 {
+            peers.truncate(4);
+        }
+    
+        println!("Iniciando crawl em {} peers (em background)...", peers.len());
+    
+        thread::spawn(move || {
+            match tokio::runtime::Runtime::new() {
+                Ok(rt) => {
+                    if let Err(e) = std::panic::catch_unwind(|| {
+                        rt.block_on(run_crawlers(peers));
+                    }) {
+                        println!("❌ Erro ao executar crawler: {:?}", e);
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Erro ao criar runtime tokio: {}", e);
+                }
             }
-        }
-        Err(e) => {
-            println!("❌ Erro ao criar runtime tokio: {}", e);
-        }
+            println!("Crawl finalizado.");
+        });
+    
+        Ok(())
     }
-
-    Ok(())
-}
 }

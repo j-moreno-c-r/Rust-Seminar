@@ -1,6 +1,6 @@
 
 use sha2::{Digest, Sha256};
-use crate::p2p::p2p_client::{InventoryItem, InventoryType};
+use crate::p2p::inventory::{InventoryItem, InventoryType};
 use std::net::{SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
 

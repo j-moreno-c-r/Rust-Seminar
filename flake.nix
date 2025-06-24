@@ -19,6 +19,7 @@
             pkgs.openssl
             pkgs.pkg-config
             pkgs.clang
+            pkgs.clippy
             pkgs.libiconv
           ];
           PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
