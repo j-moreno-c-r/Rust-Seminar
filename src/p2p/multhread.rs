@@ -38,14 +38,13 @@ pub async fn crawl_peer_with_log(
         Ok(mut _stream) => {
             log(&log_tx, LogLevel::Info, Event::Connected(addr));
             let _ = db_tx.send(DbCommand::UpdatePeerStatus(addr, PeerStatus::ConnectedRecently)).await;
-            // Adiciona ao set compartilhado
             crawl_connected.lock().unwrap().insert(addr);
 
             // Envia getaddr
             let header = MessageHeader::new("getaddr", &[]);
             let mut _message = header.to_bytes();
             if let Err(e) = _stream.try_write(&_message) {
-                log(&log_tx, LogLevel::Warn, Event::Custom(format!("Falha ao enviar getaddr para {}: {}", addr, e)));
+                log(&log_tx, LogLevel::Info, Event::Custom(format!("Falha ao enviar getaddr para {}: {}", addr, e)));
             } else {
                 log(&log_tx, LogLevel::Info, Event::Custom(format!("Enviado getaddr para {}", addr)));
             }

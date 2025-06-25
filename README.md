@@ -9,7 +9,7 @@
 
 * 5 => Multhread ✅ => In this week using tokio i implement a multhread connection with a comand in my rpc called "crawl" and with that i can connect with some of my list of peers implementede previously on my database
 
-* 6 => Log system ❗✅ => working but can be better maybe remove emojis, and needs to have the feedback of handshake of the multthread connections.
+* 6 => Log system ✅ => In this week following the proposal i create  enum of states of log that i want and it returns more or less information about my conections, and i can call log() in my methods with the level trace and the thing that i want to log and it will be returned like a log in my cli if put in my input the same or mor trace of it.
 
 * 7 => dns seeder by ip
 
