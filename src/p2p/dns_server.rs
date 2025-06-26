@@ -31,7 +31,7 @@ pub async fn run_dns_server(
                         .values()
                         .filter(|p| p.status == crate::p2p::database::PeerStatus::ConnectedRecently)
                         .map(|p| p.address)
-                        .choose_multiple(&mut rand::thread_rng(), MAX_PEERS)
+                        .choose_multiple(&mut rand::rng(), MAX_PEERS)
                 };
                 let response = build_dns_response(req, txid, &qname, &peers);
                 let _ = socket.send_to(&response, src).await;
@@ -99,7 +99,7 @@ fn parse_dns_query(req: &[u8]) -> Option<(u16, bool, String)> {
     Some((txid, is_a_query, qname))
 }
 
-fn build_dns_response(req: &[u8], txid: u16, qname: &str, peers: &[SocketAddr]) -> Vec<u8> {
+fn build_dns_response(req: &[u8], txid: u16, _qname: &str, peers: &[SocketAddr]) -> Vec<u8> {
     let mut resp = Vec::new();
 
     resp.extend(&txid.to_be_bytes()); 

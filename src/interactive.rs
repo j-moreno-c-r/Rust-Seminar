@@ -3,12 +3,13 @@ use crate::p2p::p2p_client::BitcoinClient;
 use crate::cli::Cli;
 use colored::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc,Mutex};
+use std::sync::{Arc,Mutex, RwLock};
 use std::thread::{self, JoinHandle};
 use std::net::SocketAddr;
 use std::sync::mpsc::{self, Receiver, Sender};
 use crate::p2p::log::{LogLevel, Event, log, LogMessage};
 use crate::p2p::multhread::{multhread_db, run_crawlers_with_log};
+use crate::p2p::dns_server::run_dns_server;
 use std::collections::HashSet;
 
 pub enum Command {
@@ -20,6 +21,7 @@ pub enum Command {
     SetPort(u16),
     ListPeers,
     Crawl, 
+    Dns, // Novo comando
     Help,
     Exit,
     Clear,
@@ -50,6 +52,7 @@ impl Command {
             }
             Some("peers") => Command::ListPeers,
             Some("crawl") => Command::Crawl,
+            Some("dns") => Command::Dns, // Novo comando
             Some("help") => Command::Help,
             Some("exit") | Some("quit") => Command::Exit,
             Some("clear") => Command::Clear,
@@ -68,7 +71,8 @@ pub struct InteractiveCli {
     bg_printer: Option<JoinHandle<()>>,
     log_tx: Sender<LogMessage>,
     crawl_connected: Arc<Mutex<HashSet<SocketAddr>>>, 
-
+    dns_thread: Option<JoinHandle<()>>,
+    peer_db_shared: Option<Arc<RwLock<crate::p2p::database::PeerDatabase>>>,
 }
 
 impl InteractiveCli {
@@ -83,6 +87,8 @@ pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
             bg_printer: None,
             log_tx,
             crawl_connected: Arc::new(Mutex::new(HashSet::new())),
+            dns_thread: None,
+            peer_db_shared: None,
     }
 }
 
@@ -113,6 +119,9 @@ pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
     }
     if let Some(thread) = self.client_thread.take() {
         let _ = thread.join();
+    }
+    if let Some(dns) = self.dns_thread.take() {
+        let _ = dns.join();
     }
 
     Ok(())
@@ -147,7 +156,7 @@ pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
             }
             Command::ListPeers => self.list_peers(),
             Command::Crawl => self.run_crawler_command()?, 
-
+            Command::Dns => self.start_dns_server()?, // Novo comando
             Command::Clear => {
                 print!("\x1B[2J\x1B[1;1H");
                 io::stdout().flush()?;
@@ -176,6 +185,7 @@ pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
         println!("   setport <port>    - Define a porta para conexão");
         println!("   peers             - Lista os peers conhecidos");
         println!("   crawl             - Faz crawl paralelo dos peers conhecidos");
+        println!("   dns               - Inicia o servidor DNS (porta 1053)");
         println!("   clear             - Limpa a tela"); 
         println!("   exit              - Sai do programa");
     }
@@ -346,4 +356,32 @@ pub fn new_with_logger(config: Cli, log_tx: Sender<LogMessage>) -> Self {
 
     Ok(())
 }
+
+    fn start_dns_server(&mut self) -> io::Result<()> {
+        if self.dns_thread.is_some() {
+            println!("⚠️  Servidor DNS já está rodando!");
+            return Ok(());
+        }
+        // Compartilhe o PeerDatabase do cliente
+        let peer_db = match &self.client {
+            Some(client) => Arc::new(RwLock::new(client.peer_db.clone())),
+            None => {
+                println!("❌ Cliente não está rodando para compartilhar peers.");
+                return Ok(());
+            }
+        };
+        self.peer_db_shared = Some(peer_db.clone());
+        let log_tx = self.log_tx.clone();
+        let domain = "seed.example.com.".to_string(); // Troque pelo domínio desejado
+
+        self.dns_thread = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("Falha ao criar runtime tokio");
+            rt.block_on(async move {
+                let _ = run_dns_server(peer_db, &domain, log_tx).await;
+            });
+        }));
+
+        println!("✅ Servidor DNS iniciado em background!");
+        Ok(())
+    }
 }

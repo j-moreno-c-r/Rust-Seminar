@@ -40,7 +40,6 @@ pub async fn crawl_peer_with_log(
             let _ = db_tx.send(DbCommand::UpdatePeerStatus(addr, PeerStatus::ConnectedRecently)).await;
             crawl_connected.lock().unwrap().insert(addr);
 
-            // Envia getaddr
             let header = MessageHeader::new("getaddr", &[]);
             let mut _message = header.to_bytes();
             if let Err(e) = _stream.try_write(&_message) {
