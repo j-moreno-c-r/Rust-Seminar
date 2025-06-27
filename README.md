@@ -11,6 +11,6 @@
 
 * 6 => Log system ✅ => In this week following the proposal i create  enum of states of log that i want and it returns more or less information about my conections, and i can call log() in my methods with the level trace and the thing that i want to log and it will be returned like a log in my cli if put in my input the same or mor trace of it.
 
-* 7 => dns seeder by ip
+* 7 => dns seeder by ip ❗✅ alredy has the comand and the logic but its not completely working and the door still close after all, needs debug.
 
 * 8 => RPC start, stop .... ✅
